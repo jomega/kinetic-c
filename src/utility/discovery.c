@@ -18,6 +18,8 @@
 *
 */
 
+#define _GNU_SOURCE
+
 #include <stdio.h>
 
 #include <err.h>
@@ -29,28 +31,59 @@
 #include "socket99.h"
 #include "json.h"
 
-static int discover_service(void);
+static int discover_service(char *host, int port);
 
 
 //------------------------------------------------------------------------------
 // Main Entry Point Definition
 int main(int argc, char** argv)
 {
+
+    char *default_host = "239.1.2.3";
+    int   default_port = KINETIC_PORT;
+
+    char *host = NULL;
+    int   port = 0;
+
     // TODO: CLI args?
-    (void)argc;
-    (void)argv;
-    return discover_service();
+
+    switch(argc) {
+      case 3: {
+        host = argv[1];
+        port = atoi(argv[2]);
+        break;
+      }
+
+      case 1: {
+        host = default_host;
+        port = default_port;
+        break;
+      }
+
+      default: {
+        // TODO: usage();
+        break;
+      }
+    }
+
+    return discover_service(host, port);
 }
  
    
 //------------------------------------------------------------------------------
 // Service discovery
 
-static int discover_service(void) {
+static int discover_service(char *host, int port) {
+
+    struct in_addr mcastAddr;
+    struct ip_mreq mreq;
+
+    struct hostent *host_struct;
+
     int v_true = 1;
     socket99_config cfg = {
         .host = INADDR_ANY,
-        .port = KINETIC_PORT,
+        .port = port,
         .server = true,
         .datagram = true,
         .sockopts = {
@@ -70,9 +103,24 @@ static int discover_service(void) {
         return 1;
     }
 
-    int one = 1;
-    if (0 != setsockopt(res.fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof(one))) {
-        err(1, "setsockopt");
+    if((host_struct = gethostbyname(host)) == NULL) {
+        err(1, "gethostbyname");
+        // usage();
+    }
+
+    memcpy(&mcastAddr, host_struct->h_addr_list[0], host_struct->h_length);
+
+    if(!IN_MULTICAST(ntohl(mcastAddr.s_addr))) {
+        err(1, "invalid mcast address");
+        // usage();
+    }
+
+    mreq.imr_multiaddr.s_addr = mcastAddr.s_addr;
+    mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+
+    if (0 != setsockopt(res.fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, (void *)&mreq, sizeof(mreq))) {
+        err(1, "failed to join multicast group");
+        // usage();
     }
 
     char buf[1024];

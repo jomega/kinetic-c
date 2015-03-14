@@ -137,9 +137,96 @@ static int discover_service(char *host, int port) {
             (struct sockaddr *)&client_addr, &addr_len);
 
         if (received > 0) {
+
+            struct json_object  *obj = NULL;
+            struct json_object  *val = NULL;
+            struct json_tokener *tok = NULL;
+
+            tok = json_tokener_new();
+
             buf[received] = '\0';
-            printf("Got: '%s'\n", buf);
-            /* TODO: sink into json, print decoded data. */
+
+            obj = json_tokener_parse_ex(tok, buf, received);
+
+            if(obj == NULL) {
+                if(json_tokener_get_error(tok) != json_tokener_error_parse_eof) {
+                    printf("JSON error %d", json_tokener_get_error(tok));
+                }
+            }
+
+            if(json_object_object_get_ex(obj, "world_wide_name", &val)) {
+                printf("World Wide Name: %s\n", json_object_to_json_string(val));
+            }
+
+
+            if(json_object_object_get_ex(obj, "firmware_version", &val)) {
+                printf("Firmware Ver: %s\n", json_object_to_json_string(val));
+            }
+
+            if(json_object_object_get_ex(obj, "manufacturer", &val)) {
+                printf("Manufacturer: %s\n", json_object_to_json_string(val));
+            }
+
+            if(json_object_object_get_ex(obj, "model", &val)) {
+                printf("Model: %s\n", json_object_to_json_string(val));
+            }
+
+            if(json_object_object_get_ex(obj, "serial_number", &val)) {
+                printf("Serial Number: %s\n", json_object_to_json_string(val));
+            }
+
+            if(json_object_object_get_ex(obj, "protocol_version", &val)) {
+                printf("Protocol Ver: %s\n", json_object_to_json_string(val));
+            }
+
+
+            if(json_object_object_get_ex(obj, "network_interfaces", &val)) {
+                int i, len = json_object_array_length(val);
+
+                struct json_object *array_obj = NULL;
+                struct json_object *array_val = NULL;
+
+                printf("Network Interfaces [%d]\n", len);
+
+                for(i = 0; i < len; i++) {
+                    array_obj = json_object_array_get_idx(val, i);
+
+                    if(json_object_object_get_ex(array_obj, "name", &array_val)) {
+                        printf("    Name: %s\n", json_object_to_json_string(array_val));
+                    }
+
+                    if(json_object_object_get_ex(array_obj, "ipv4_addr", &array_val)) {
+                        printf("    IPv4 Address: %s\n", json_object_to_json_string(array_val));
+                    }
+
+                    if(json_object_object_get_ex(array_obj, "ipv6_addr", &array_val)) {
+                        printf("    IPv6 Address: %s\n", json_object_to_json_string(array_val));
+                    }
+
+                    if(json_object_object_get_ex(array_obj, "mac_addr", &array_val)) {
+                        printf("    HW Address: %s\n", json_object_to_json_string(array_val));
+                    }
+
+                    if((i + 1) < len) {
+                      printf("\n");
+                    }
+
+                    json_object_put(array_obj);
+                }
+
+            }
+
+            if(json_object_object_get_ex(obj, "port", &val)) {
+                printf("Port: %s\n", json_object_to_json_string(val));
+            }
+
+            if(json_object_object_get_ex(obj, "tlsPort", &val)) {
+                printf("TLS Port: %s\n", json_object_to_json_string(val));
+            }
+
+            printf("\n\n");
+
+            json_object_put(obj);
         }
     }
     

@@ -24,6 +24,7 @@
 
 #include <err.h>
 #include <errno.h>
+#include <time.h>
 
 #include <netinet/in.h>
 
@@ -31,8 +32,57 @@
 #include "socket99.h"
 #include "json.h"
 
-static int discover_service(char *host, int port);
+enum {
+    DRIVE_STATE_UNKNWN,
+    DRIVE_STATE_WARNING,
+    DRIVE_STATE_OFFLINE,
+    DRIVE_STATE_TIMEOUT,
+    DRIVE_STATE_ONLINE,
+    DRIVE_STATE_BOOTPC,
+    DRIVE_STATE_SIZE
+};
 
+struct _Interface {
+    char name[50];            /* Name of interface, i.e. eth0 */
+    char  ip4[50];            /* IPv4 Address */
+    char  ip6[50];            /* IPv6 Address */
+    char  eth[50];            /* Ethernet Address */
+};
+
+typedef struct _Interface  Interfaces;
+
+struct _DriveEntry {
+
+    char    wwname[50];       /* World Wide Name */
+    char     fwver[50];       /* Firmware Version */
+    char     maker[50];       /* Manufacturer */
+    char     model[50];       /* Model */
+    char     serno[50];       /* Drive Serial Number */
+    char proto_ver[50];       /* Protobuf Protocol Version */
+
+    Interfaces interfaces[2]; /* only two interfaces for now */
+
+    int mcast_port;           /* Default 8123 */
+    int tls_port;             /* Default 8443 */
+
+    uint8_t state;            /* Current record state */
+    struct timeval tstamp;    /* Time Stamp */
+};
+
+typedef struct _DriveEntry DriveEntries;
+
+struct _EntryArray {
+    uint32_t      allocated;  /* Amount allocated */
+    uint32_t      used;       /* Amount used */
+    DriveEntries **entries;   /* Drive Entries */
+};
+
+typedef struct _EntryArray EntryArray;
+
+static int  discover_service(char *host, int port);
+static bool find_drive_entry(EntryArray *array, struct timeval t, const char *id);
+static char *trim_json_string(char *str);
+void print_drive_entry(DriveEntries *drv, int state);
 
 //------------------------------------------------------------------------------
 // Main Entry Point Definition
@@ -45,7 +95,16 @@ int main(int argc, char** argv)
     char *host = NULL;
     int   port = 0;
 
-    // TODO: CLI args?
+/*
+    int option, optionIndex = 0;
+
+    struct option long_options[] = {
+     
+    };
+
+    while ((option = getopt_long_only(argc, argv, "?lhptics:", long_options, &optionIndex)) != -1) {
+    }
+*/
 
     switch(argc) {
       case 3: {
@@ -68,8 +127,120 @@ int main(int argc, char** argv)
 
     return discover_service(host, port);
 }
- 
-   
+
+static char *trim_json_string(char *str) {
+    int i = 0;
+    int j = strlen(str) - 1;
+    int k = 0;
+
+    while(str[i] == '"' && str[i] != '\0') i++;
+    while(str[j] == '"' && j > 0) j--;
+    while(i <= j) str[k++] = str[i++];
+
+    str[k] = '\0';
+
+    return str;
+}
+
+void print_drive_entry(DriveEntries *drv, int state) {
+
+    time_t epoch       = time(NULL);
+    struct tm timetag  = *localtime(&epoch);
+
+    char time_str[20]  = "";
+
+    char eth1_str[255] = "";
+    char eth0_str[255] = "";
+
+    char state_str[15] = "";
+
+    char proto_str[50] = "";
+
+    snprintf(time_str, 20, "%d-%03d-%02d-%02d-%02d", timetag.tm_year + 1900, timetag.tm_yday, timetag.tm_hour, timetag.tm_min, timetag.tm_sec);
+
+    switch(state) {
+        case DRIVE_STATE_UNKNWN: {
+            strncpy(state_str, "UNKNWN", 15); 
+            break;
+        }
+
+        case DRIVE_STATE_WARNING: {
+            strncpy(proto_str, drv->proto_ver, 15);
+
+            snprintf(eth0_str, 255, "%s %s %s %s", drv->interfaces[0].name, drv->interfaces[0].ip4, drv->interfaces[0].ip6, drv->interfaces[0].eth);
+            snprintf(eth1_str, 255, "%s %s %s %s", drv->interfaces[1].name, drv->interfaces[1].ip4, drv->interfaces[1].ip6, drv->interfaces[1].eth);
+
+            strncpy(state_str, "WARNING", 15); 
+            break;
+        }
+
+        case DRIVE_STATE_OFFLINE: {
+            strncpy(proto_str, drv->proto_ver, 15);
+
+            snprintf(eth0_str, 255, "%s %s %s %s", drv->interfaces[0].name, drv->interfaces[0].ip4, drv->interfaces[0].ip6, drv->interfaces[0].eth);
+            snprintf(eth1_str, 255, "%s %s %s %s", drv->interfaces[1].name, drv->interfaces[1].ip4, drv->interfaces[1].ip6, drv->interfaces[1].eth);
+
+            strncpy(state_str, "OFFLINE", 15); 
+            break;
+        }
+
+        case DRIVE_STATE_TIMEOUT: {
+            strncpy(proto_str, drv->proto_ver, 15);
+
+            snprintf(eth0_str, 255, "%s %s %s %s", drv->interfaces[0].name, drv->interfaces[0].ip4, drv->interfaces[0].ip6, drv->interfaces[0].eth);
+            snprintf(eth1_str, 255, "%s %s %s %s", drv->interfaces[1].name, drv->interfaces[1].ip4, drv->interfaces[1].ip6, drv->interfaces[1].eth);
+
+            strncpy(state_str, "TIMEOUT", 15); 
+            break;
+        }
+
+        case DRIVE_STATE_ONLINE: {
+            strncpy(proto_str, drv->proto_ver, 15);
+
+            snprintf(eth0_str, 255, "%s %s %s %s", drv->interfaces[0].name, drv->interfaces[0].ip4, drv->interfaces[0].ip6, drv->interfaces[0].eth);
+            snprintf(eth1_str, 255, "%s %s %s %s", drv->interfaces[1].name, drv->interfaces[1].ip4, drv->interfaces[1].ip6, drv->interfaces[1].eth);
+
+            strncpy(state_str, "ONLINE", 15); 
+            break;
+        }
+
+        case DRIVE_STATE_BOOTPC: {
+            strncpy(state_str, "BOOTPC", 15); 
+            break;
+        }
+
+        default: {
+            strncpy(state_str, "UNKNWN", 15); 
+            break;
+        }
+    }
+
+    printf("%s,%s,%s,%s,%s,%s,%d,%d\n", time_str, state_str, drv->wwname, drv->proto_ver, eth0_str, eth1_str, drv->mcast_port, drv->tls_port);
+}
+
+static bool find_drive_entry(EntryArray *array, struct timeval t, const char *id) {
+    bool flag = FALSE;
+
+    uint32_t i = 0;
+
+    for(i = 0; i < array->used; i++) {
+      if(strlen((array->entries[i])->wwname) == strlen(id)) {
+        if(strstr((array->entries[i])->wwname, id)) {
+          flag = TRUE;
+
+          /* stamp the entry */
+          (array->entries[i])->tstamp.tv_sec  = t.tv_sec;
+          (array->entries[i])->tstamp.tv_usec = t.tv_usec;
+
+          break;
+        }
+      }
+    }
+
+    return flag;
+}
+
+  
 //------------------------------------------------------------------------------
 // Service discovery
 
@@ -132,9 +303,22 @@ static int discover_service(char *host, int port) {
      *     + set up multicast on 239.1.2.3
      *     + if we receive any info, print it */
 
+    EntryArray *driveList = (EntryArray *)malloc(sizeof(EntryArray));
+
+    driveList->used       = 0;
+    driveList->allocated  = 2; /* Start off with two allocations */
+    driveList->entries    = NULL;
+
+    driveList->entries    = (DriveEntries **)malloc(2 * sizeof(DriveEntries));
+
+    // TODO: Test memory allocation!
+
     for (;;) {
-        ssize_t received = recvfrom(res.fd, buf, sizeof(buf), 0,
-            (struct sockaddr *)&client_addr, &addr_len);
+        ssize_t received = recvfrom(res.fd, buf, sizeof(buf), 0, (struct sockaddr *)&client_addr, &addr_len);
+
+        struct timeval arrival_time;
+
+        char json_str[50] = "";
 
         if (received > 0) {
 
@@ -151,84 +335,135 @@ static int discover_service(char *host, int port) {
             if(obj == NULL) {
                 if(json_tokener_get_error(tok) != json_tokener_error_parse_eof) {
                     printf("JSON error %d", json_tokener_get_error(tok));
+                } else {
+                    gettimeofday(&arrival_time, NULL);
                 }
+            }
+
+            if(driveList->used == driveList->allocated) {
+                driveList->entries    = realloc(driveList->entries, (driveList->used + 2) * sizeof(DriveEntries *));
+                driveList->allocated += 2;
             }
 
             if(json_object_object_get_ex(obj, "world_wide_name", &val)) {
-                printf("World Wide Name: %s\n", json_object_to_json_string(val));
-            }
 
+                strncpy(json_str, json_object_to_json_string(val), 50);
+                char *s_ptr = trim_json_string(json_str);
 
-            if(json_object_object_get_ex(obj, "firmware_version", &val)) {
-                printf("Firmware Ver: %s\n", json_object_to_json_string(val));
-            }
+                if(!find_drive_entry(driveList, arrival_time, s_ptr)) {
+                    DriveEntries *new_entry = (DriveEntries *)malloc(sizeof(DriveEntries));
 
-            if(json_object_object_get_ex(obj, "manufacturer", &val)) {
-                printf("Manufacturer: %s\n", json_object_to_json_string(val));
-            }
+                    // TODO: Test memory allocation!
 
-            if(json_object_object_get_ex(obj, "model", &val)) {
-                printf("Model: %s\n", json_object_to_json_string(val));
-            }
+                    /* Default Values */
+                    strncpy(new_entry->wwname, s_ptr, 50);
 
-            if(json_object_object_get_ex(obj, "serial_number", &val)) {
-                printf("Serial Number: %s\n", json_object_to_json_string(val));
-            }
+                    new_entry->mcast_port = 0;
+                    new_entry->tls_port   = 0;
+                    new_entry->state      = DRIVE_STATE_ONLINE;
 
-            if(json_object_object_get_ex(obj, "protocol_version", &val)) {
-                printf("Protocol Ver: %s\n", json_object_to_json_string(val));
-            }
+                    if(json_object_object_get_ex(obj, "firmware_version", &val)) {
+                        strncpy(json_str, json_object_to_json_string(val), 50);
+                        s_ptr = trim_json_string(json_str);
 
-
-            if(json_object_object_get_ex(obj, "network_interfaces", &val)) {
-                int i, len = json_object_array_length(val);
-
-                struct json_object *array_obj = NULL;
-                struct json_object *array_val = NULL;
-
-                printf("Network Interfaces [%d]\n", len);
-
-                for(i = 0; i < len; i++) {
-                    array_obj = json_object_array_get_idx(val, i);
-
-                    if(json_object_object_get_ex(array_obj, "name", &array_val)) {
-                        printf("    Name: %s\n", json_object_to_json_string(array_val));
+                        strncpy(new_entry->fwver, s_ptr, 50);
                     }
 
-                    if(json_object_object_get_ex(array_obj, "ipv4_addr", &array_val)) {
-                        printf("    IPv4 Address: %s\n", json_object_to_json_string(array_val));
+                    if(json_object_object_get_ex(obj, "manufacturer", &val)) {
+                        strncpy(json_str, json_object_to_json_string(val), 50);
+                        s_ptr = trim_json_string(json_str);
+
+                        strncpy(new_entry->maker, s_ptr, 50);
                     }
 
-                    if(json_object_object_get_ex(array_obj, "ipv6_addr", &array_val)) {
-                        printf("    IPv6 Address: %s\n", json_object_to_json_string(array_val));
+                    if(json_object_object_get_ex(obj, "model", &val)) {
+                        strncpy(json_str, json_object_to_json_string(val), 50);
+                        s_ptr = trim_json_string(json_str);
+
+                        strncpy(new_entry->model, s_ptr, 50);
                     }
 
-                    if(json_object_object_get_ex(array_obj, "mac_addr", &array_val)) {
-                        printf("    HW Address: %s\n", json_object_to_json_string(array_val));
+                    if(json_object_object_get_ex(obj, "serial_number", &val)) {
+                        strncpy(json_str, json_object_to_json_string(val), 50);
+                        s_ptr = trim_json_string(json_str);
+
+                        strncpy(new_entry->serno, s_ptr, 50);
                     }
 
-                    if((i + 1) < len) {
-                      printf("\n");
+                    if(json_object_object_get_ex(obj, "protocol_version", &val)) {
+                        strncpy(json_str, json_object_to_json_string(val), 50);
+                        s_ptr = trim_json_string(json_str);
+
+                        strncpy(new_entry->proto_ver, s_ptr, 50);
                     }
 
-                    json_object_put(array_obj);
+                    if(json_object_object_get_ex(obj, "network_interfaces", &val)) {
+                        int i = 0;
+
+                        // int len = json_object_array_length(val);
+
+                        struct json_object *array_obj = NULL;
+                        struct json_object *array_val = NULL;
+
+                        /* Currently the data structure only supports two interfaces */
+                        for(i = 0; i < 2; i++) {
+                            array_obj = json_object_array_get_idx(val, i);
+
+                            if(json_object_object_get_ex(array_obj, "name", &array_val)) {
+                                strncpy(json_str, json_object_to_json_string(array_val), 50);
+                                s_ptr = trim_json_string(json_str);
+
+                                strncpy(new_entry->interfaces[i].name, s_ptr, 50);
+                            }
+
+                            if(json_object_object_get_ex(array_obj, "ipv4_addr", &array_val)) {
+                                strncpy(json_str, json_object_to_json_string(array_val), 50);
+                                s_ptr = trim_json_string(json_str);
+
+                                strncpy(new_entry->interfaces[i].ip4, s_ptr, 50);
+                            }
+
+                            if(json_object_object_get_ex(array_obj, "ipv6_addr", &array_val)) {
+                                strncpy(json_str, json_object_to_json_string(array_val), 50);
+                                s_ptr = trim_json_string(json_str);
+
+                                strncpy(new_entry->interfaces[i].ip6, s_ptr, 50);
+                            }
+
+                            if(json_object_object_get_ex(array_obj, "mac_addr", &array_val)) {
+                                strncpy(json_str, json_object_to_json_string(array_val), 50);
+                                s_ptr = trim_json_string(json_str);
+
+                                strncpy(new_entry->interfaces[i].eth, s_ptr, 50);
+                            }
+
+                            json_object_put(array_obj);
+                        }
+                    }
+
+                    if(json_object_object_get_ex(obj, "port", &val)) {
+                        strncpy(json_str, json_object_to_json_string(val), 50);
+
+                        new_entry->mcast_port = atoi(json_str);
+                    }
+
+                    if(json_object_object_get_ex(obj, "tlsPort", &val)) {
+                        strncpy(json_str, json_object_to_json_string(val), 50);
+
+                        new_entry->tls_port = atoi(json_str);
+                    }
+
+                    driveList->entries[driveList->used] = new_entry;
+                    driveList->used++;
+
+                    print_drive_entry(new_entry, new_entry->state);
                 }
 
             }
-
-            if(json_object_object_get_ex(obj, "port", &val)) {
-                printf("Port: %s\n", json_object_to_json_string(val));
-            }
-
-            if(json_object_object_get_ex(obj, "tlsPort", &val)) {
-                printf("TLS Port: %s\n", json_object_to_json_string(val));
-            }
-
-            printf("\n\n");
 
             json_object_put(obj);
         }
     }
-    
+
     return 0;
 }

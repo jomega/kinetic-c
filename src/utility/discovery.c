@@ -306,10 +306,10 @@ static int discover_service(char *host, int port) {
     EntryArray *driveList = (EntryArray *)malloc(sizeof(EntryArray));
 
     driveList->used       = 0;
-    driveList->allocated  = 2; /* Start off with two allocations */
+    driveList->allocated  = 500;
     driveList->entries    = NULL;
 
-    driveList->entries    = (DriveEntries **)malloc(2 * sizeof(DriveEntries));
+    driveList->entries    = (DriveEntries **)malloc(500 * sizeof(DriveEntries));
 
     // TODO: Test memory allocation!
 
@@ -341,8 +341,8 @@ static int discover_service(char *host, int port) {
             }
 
             if(driveList->used == driveList->allocated) {
-                driveList->entries    = realloc(driveList->entries, (driveList->used + 2) * sizeof(DriveEntries *));
-                driveList->allocated += 2;
+                driveList->entries    = realloc(driveList->entries, (driveList->used + 500) * sizeof(DriveEntries *));
+                driveList->allocated += 500;
             }
 
             if(json_object_object_get_ex(obj, "world_wide_name", &val)) {

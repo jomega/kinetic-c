@@ -332,11 +332,11 @@ static int discover_service(char *host, int port) {
 
             obj = json_tokener_parse_ex(tok, buf, received);
 
+            gettimeofday(&arrival_time, NULL);
+
             if(obj == NULL) {
                 if(json_tokener_get_error(tok) != json_tokener_error_parse_eof) {
                     printf("JSON error %d", json_tokener_get_error(tok));
-                } else {
-                    gettimeofday(&arrival_time, NULL);
                 }
             }
 

@@ -138,56 +138,6 @@ int main(int argc, char** argv)
     return discover_service(host, port);
 }
 
-/*
-static int getDriveState(char *host, int port) {
-
-    int retval = DRIVE_STATE_UNKNWN;
-
-    printf("%s:%d\n", host, port);
-
-    // Initialize kinetic-c and configure sessions
-    KineticSession *session;
-
-    KineticClientConfig clientConfig = {
-        .logFile = "stdout",
-        .logLevel = 1,
-    };
-
-    KineticClient *client = KineticClient_Init(&clientConfig);
-
-    if (client == NULL) {
-      return retval;
-    }
-
-    const char HmacKeyString[] = "asdfasdf";
-    KineticSessionConfig sessionConfig = {
-        .host = "",
-        .port = KINETIC_PORT,
-        .clusterVersion = 0,
-        .identity = 1,
-        .hmacKey = ByteArray_CreateWithCString(HmacKeyString),
-    };
-
-    strncpy(sessionConfig.host, host, strlen(host));
-
-    KineticStatus status = KineticClient_CreateSession(&sessionConfig, client, &session);
-    if (status != KINETIC_STATUS_SUCCESS) {
-        fprintf(stderr, "Failed connecting to the Kinetic device w/status: %s\n",
-            Kinetic_GetStatusDescription(status));
-        exit(1);
-    }
-
-    KineticStatus noop_status = KineticClient_NoOp(session);
-    printf("NoOp status: %s\n", Kinetic_GetStatusDescription(noop_status));
-
-    // Shutdown client connection and cleanup
-    KineticClient_DestroySession(session);
-    KineticClient_Shutdown(client);
-
-    return retval;
-}
-*/
-
 static int getDriveState(char *host, int port) {
 
     int retval = DRIVE_STATE_UNKNWN;

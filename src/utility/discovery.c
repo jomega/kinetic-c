@@ -172,12 +172,6 @@ static int getDriveState(char *host, int port) {
         if(session_status == KINETIC_STATUS_SUCCESS) {
             retval = DRIVE_STATE_ONLINE;
 
-            KineticStatus term_status = KineticClient_GetTerminationStatus(session);
-
-            if(term_status != KINETIC_STATUS_SUCCESS) {
-                printf("%s:%d %s\n", __FILE__, __LINE__, Kinetic_GetStatusDescription(term_status));
-            }
-
             KineticStatus noop_status = KineticClient_NoOp(session);
 
             if(noop_status != KINETIC_STATUS_SUCCESS) {
@@ -324,26 +318,27 @@ static bool find_drive_entry(struct timeval t, const char *id) {
     uint32_t i = 0;
 
     for(i = 0; i < driveList->used; i++) {
-      if(strlen((driveList->entries[i])->wwname) == strlen(id)) {
+
+        if(strlen((driveList->entries[i])->wwname) != strlen(id)) break;
+
         if(strstr((driveList->entries[i])->wwname, id)) {
-          flag = TRUE;
+            flag = TRUE;
 
-          /* stamp the entry */
-          (driveList->entries[i])->tstamp.tv_sec  = t.tv_sec;
-          (driveList->entries[i])->tstamp.tv_usec = t.tv_usec;
+            /* stamp the entry */
+            (driveList->entries[i])->tstamp.tv_sec  = t.tv_sec;
+            (driveList->entries[i])->tstamp.tv_usec = t.tv_usec;
 
-          // Check for a state change.
-          // TODO: let's not assume iface[0] has a valid IP address.
-          int s = getDriveState((driveList->entries[i])->interfaces[0].ip4, (driveList->entries[i])->mcast_port);
+            // Check for a state change.
+            // TODO: let's not assume iface[0] has a valid IP address.
+            int s = getDriveState((driveList->entries[i])->interfaces[0].ip4, (driveList->entries[i])->mcast_port);
 
-          if(s != (driveList->entries[i])->state) {
-              (driveList->entries[i])->state = s;
-              print_drive_entry(driveList->entries[i], (driveList->entries[i])->state);
-          }
+            if(s != (driveList->entries[i])->state) {
+                (driveList->entries[i])->state = s;
+                print_drive_entry(driveList->entries[i], (driveList->entries[i])->state);
+            }
 
-          break;
+            break;
         }
-      }
     }
 
     return flag;
@@ -552,6 +547,9 @@ static int discover_service(char *host, int port) {
 
                                 strncpy(new_entry->interfaces[i].ip6, s_ptr, 50);
 
+                                //
+                                // KineticClient_CreateSession() doesn't seem to like ipv6 addresses.
+                                //
                                 /* new_entry->state      = getDriveState(s_ptr, new_entry->mcast_port); */
                             }
 

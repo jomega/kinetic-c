@@ -319,7 +319,7 @@ static bool find_drive_entry(struct timeval t, const char *id) {
 
     for(i = 0; i < driveList->used; i++) {
 
-        if(strlen((driveList->entries[i])->wwname) != strlen(id)) break;
+        if(strlen((driveList->entries[i])->wwname) != strlen(id)) continue;
 
         if(strstr((driveList->entries[i])->wwname, id)) {
             flag = TRUE;

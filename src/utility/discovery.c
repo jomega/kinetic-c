@@ -22,18 +22,25 @@
 
 #include <stdio.h>
 
+#include "kinetic_client.h"
+#include "kinetic_types.h"
+#include "byte_array.h"
+#include "socket99.h"
+#include "json.h"
+
+#include <getopt.h>
 #include <err.h>
 #include <errno.h>
 #include <time.h>
 
 #include <netinet/in.h>
 
-#include "kinetic_client.h"
-#include "socket99.h"
-#include "json.h"
+#include <openssl/sha.h>
 
 enum {
     DRIVE_STATE_UNKNWN,
+    DRIVE_STATE_LOCKED,
+    DRIVE_STATE_CVMISS,
     DRIVE_STATE_WARNING,
     DRIVE_STATE_OFFLINE,
     DRIVE_STATE_TIMEOUT,
@@ -79,10 +86,13 @@ struct _EntryArray {
 
 typedef struct _EntryArray EntryArray;
 
-static int  discover_service(char *host, int port);
-static bool find_drive_entry(EntryArray *array, struct timeval t, const char *id);
+static int   discover_service(char *host, int port);
+static bool  find_drive_entry(struct timeval t, const char *id);
 static char *trim_json_string(char *str);
-void print_drive_entry(DriveEntries *drv, int state);
+static int   getDriveState(char *host, int port);
+void         print_drive_entry(DriveEntries *drv, int state);
+
+EntryArray *driveList = NULL;
 
 //------------------------------------------------------------------------------
 // Main Entry Point Definition
@@ -128,6 +138,126 @@ int main(int argc, char** argv)
     return discover_service(host, port);
 }
 
+/*
+static int getDriveState(char *host, int port) {
+
+    int retval = DRIVE_STATE_UNKNWN;
+
+    printf("%s:%d\n", host, port);
+
+    // Initialize kinetic-c and configure sessions
+    KineticSession *session;
+
+    KineticClientConfig clientConfig = {
+        .logFile = "stdout",
+        .logLevel = 1,
+    };
+
+    KineticClient *client = KineticClient_Init(&clientConfig);
+
+    if (client == NULL) {
+      return retval;
+    }
+
+    const char HmacKeyString[] = "asdfasdf";
+    KineticSessionConfig sessionConfig = {
+        .host = "",
+        .port = KINETIC_PORT,
+        .clusterVersion = 0,
+        .identity = 1,
+        .hmacKey = ByteArray_CreateWithCString(HmacKeyString),
+    };
+
+    strncpy(sessionConfig.host, host, strlen(host));
+
+    KineticStatus status = KineticClient_CreateSession(&sessionConfig, client, &session);
+    if (status != KINETIC_STATUS_SUCCESS) {
+        fprintf(stderr, "Failed connecting to the Kinetic device w/status: %s\n",
+            Kinetic_GetStatusDescription(status));
+        exit(1);
+    }
+
+    KineticStatus noop_status = KineticClient_NoOp(session);
+    printf("NoOp status: %s\n", Kinetic_GetStatusDescription(noop_status));
+
+    // Shutdown client connection and cleanup
+    KineticClient_DestroySession(session);
+    KineticClient_Shutdown(client);
+
+    return retval;
+}
+*/
+
+static int getDriveState(char *host, int port) {
+
+    int retval = DRIVE_STATE_UNKNWN;
+
+    KineticSession *session;
+
+    KineticClientConfig clientConfig;
+
+    clientConfig.logFile              = "stdout";
+    clientConfig.logLevel             = 0;
+    clientConfig.readerThreads        = 0;
+    clientConfig.maxThreadpoolThreads = 0;
+
+    KineticClient *client = KineticClient_Init(&clientConfig);
+
+    if(client != NULL) {
+        const char HmacKeyString[]   = "asdfasdf";
+
+        KineticSessionConfig sessionConfig;
+
+        strncpy(sessionConfig.host, host, HOST_NAME_MAX);
+
+        sessionConfig.port           = port;
+        sessionConfig.clusterVersion = 0; // TODO: How do we determine clusterversion?
+        sessionConfig.identity       = 1;
+        sessionConfig.useSsl         = false;
+        sessionConfig.timeoutSeconds = 1;
+        sessionConfig.hmacKey        = ByteArray_CreateWithCString(HmacKeyString);
+
+        KineticStatus session_status = KineticClient_CreateSession(&sessionConfig, client, &session);
+
+        if(session_status == KINETIC_STATUS_SUCCESS) {
+            retval = DRIVE_STATE_ONLINE;
+
+            KineticStatus term_status = KineticClient_GetTerminationStatus(session);
+
+            if(term_status != KINETIC_STATUS_SUCCESS) {
+                printf("%s:%d %s\n", __FILE__, __LINE__, Kinetic_GetStatusDescription(term_status));
+            }
+
+            KineticStatus noop_status = KineticClient_NoOp(session);
+
+            if(noop_status != KINETIC_STATUS_SUCCESS) {
+
+                KineticStatus termi_status = KineticClient_GetTerminationStatus(session);
+
+                if(termi_status == KINETIC_STATUS_DEVICE_LOCKED) {
+                    retval = DRIVE_STATE_LOCKED;
+                } else if(termi_status == KINETIC_STATUS_INVALID_REQUEST) {
+                    // 3.0.0 drives report INVALID_REQUEST instead of DEVICE_LOCKED
+                    retval = DRIVE_STATE_LOCKED;
+                }
+
+                if(noop_status == KINETIC_STATUS_CLUSTER_MISMATCH) {
+                    retval = DRIVE_STATE_CVMISS;
+                }
+            }
+
+        } else {
+            printf("%s:%d %s\n", __FILE__, __LINE__, Kinetic_GetStatusDescription(session_status));
+        }
+
+        // Clean up
+        KineticClient_DestroySession(session);
+        KineticClient_Shutdown(client);
+    }
+
+    return retval;
+}
+
 static char *trim_json_string(char *str) {
     int i = 0;
     int j = strlen(str) - 1;
@@ -156,11 +286,31 @@ void print_drive_entry(DriveEntries *drv, int state) {
 
     char proto_str[50] = "";
 
-    snprintf(time_str, 20, "%d-%03d-%02d-%02d-%02d", timetag.tm_year + 1900, timetag.tm_yday, timetag.tm_hour, timetag.tm_min, timetag.tm_sec);
+    snprintf(time_str, 20, "%04d-%03d-%02d:%02d:%02d", timetag.tm_year + 1900, timetag.tm_yday, timetag.tm_hour, timetag.tm_min, timetag.tm_sec);
 
     switch(state) {
         case DRIVE_STATE_UNKNWN: {
             strncpy(state_str, "UNKNWN", 15); 
+            break;
+        }
+
+        case DRIVE_STATE_LOCKED: {
+            strncpy(proto_str, drv->proto_ver, 15);
+
+            snprintf(eth0_str, 255, "%s %s %s %s", drv->interfaces[0].name, drv->interfaces[0].ip4, drv->interfaces[0].ip6, drv->interfaces[0].eth);
+            snprintf(eth1_str, 255, "%s %s %s %s", drv->interfaces[1].name, drv->interfaces[1].ip4, drv->interfaces[1].ip6, drv->interfaces[1].eth);
+
+            strncpy(state_str, "LOCKED", 15); 
+            break;
+        }
+
+        case DRIVE_STATE_CVMISS: {
+            strncpy(proto_str, drv->proto_ver, 15);
+
+            snprintf(eth0_str, 255, "%s %s %s %s", drv->interfaces[0].name, drv->interfaces[0].ip4, drv->interfaces[0].ip6, drv->interfaces[0].eth);
+            snprintf(eth1_str, 255, "%s %s %s %s", drv->interfaces[1].name, drv->interfaces[1].ip4, drv->interfaces[1].ip6, drv->interfaces[1].eth);
+
+            strncpy(state_str, "CV-MISMATCH", 15); 
             break;
         }
 
@@ -215,22 +365,31 @@ void print_drive_entry(DriveEntries *drv, int state) {
         }
     }
 
-    printf("%s,%s,%s,%s,%s,%s,%d,%d\n", time_str, state_str, drv->wwname, drv->proto_ver, eth0_str, eth1_str, drv->mcast_port, drv->tls_port);
+    printf("%s,%s,%s,%s,%d,%d,%s,%s\n", time_str, state_str, drv->serno, drv->proto_ver, drv->mcast_port, drv->tls_port, eth0_str, eth1_str);
 }
 
-static bool find_drive_entry(EntryArray *array, struct timeval t, const char *id) {
+static bool find_drive_entry(struct timeval t, const char *id) {
     bool flag = FALSE;
 
     uint32_t i = 0;
 
-    for(i = 0; i < array->used; i++) {
-      if(strlen((array->entries[i])->wwname) == strlen(id)) {
-        if(strstr((array->entries[i])->wwname, id)) {
+    for(i = 0; i < driveList->used; i++) {
+      if(strlen((driveList->entries[i])->wwname) == strlen(id)) {
+        if(strstr((driveList->entries[i])->wwname, id)) {
           flag = TRUE;
 
           /* stamp the entry */
-          (array->entries[i])->tstamp.tv_sec  = t.tv_sec;
-          (array->entries[i])->tstamp.tv_usec = t.tv_usec;
+          (driveList->entries[i])->tstamp.tv_sec  = t.tv_sec;
+          (driveList->entries[i])->tstamp.tv_usec = t.tv_usec;
+
+          // Check for a state change.
+          // TODO: let's not assume iface[0] has a valid IP address.
+          int s = getDriveState((driveList->entries[i])->interfaces[0].ip4, (driveList->entries[i])->mcast_port);
+
+          if(s != (driveList->entries[i])->state) {
+              (driveList->entries[i])->state = s;
+              print_drive_entry(driveList->entries[i], (driveList->entries[i])->state);
+          }
 
           break;
         }
@@ -303,7 +462,7 @@ static int discover_service(char *host, int port) {
      *     + set up multicast on 239.1.2.3
      *     + if we receive any info, print it */
 
-    EntryArray *driveList = (EntryArray *)malloc(sizeof(EntryArray));
+    driveList = (EntryArray *)malloc(sizeof(EntryArray));
 
     driveList->used       = 0;
     driveList->allocated  = 500;
@@ -350,7 +509,7 @@ static int discover_service(char *host, int port) {
                 strncpy(json_str, json_object_to_json_string(val), 50);
                 char *s_ptr = trim_json_string(json_str);
 
-                if(!find_drive_entry(driveList, arrival_time, s_ptr)) {
+                if(!find_drive_entry(arrival_time, s_ptr)) {
                     DriveEntries *new_entry = (DriveEntries *)malloc(sizeof(DriveEntries));
 
                     // TODO: Test memory allocation!
@@ -397,6 +556,18 @@ static int discover_service(char *host, int port) {
                         strncpy(new_entry->proto_ver, s_ptr, 50);
                     }
 
+                    if(json_object_object_get_ex(obj, "port", &val)) {
+                        strncpy(json_str, json_object_to_json_string(val), 50);
+
+                        new_entry->mcast_port = atoi(json_str);
+                    }
+
+                    if(json_object_object_get_ex(obj, "tlsPort", &val)) {
+                        strncpy(json_str, json_object_to_json_string(val), 50);
+
+                        new_entry->tls_port = atoi(json_str);
+                    }
+
                     if(json_object_object_get_ex(obj, "network_interfaces", &val)) {
                         int i = 0;
 
@@ -421,6 +592,8 @@ static int discover_service(char *host, int port) {
                                 s_ptr = trim_json_string(json_str);
 
                                 strncpy(new_entry->interfaces[i].ip4, s_ptr, 50);
+
+                                new_entry->state      = getDriveState(s_ptr, new_entry->mcast_port);
                             }
 
                             if(json_object_object_get_ex(array_obj, "ipv6_addr", &array_val)) {
@@ -428,6 +601,8 @@ static int discover_service(char *host, int port) {
                                 s_ptr = trim_json_string(json_str);
 
                                 strncpy(new_entry->interfaces[i].ip6, s_ptr, 50);
+
+                                /* new_entry->state      = getDriveState(s_ptr, new_entry->mcast_port); */
                             }
 
                             if(json_object_object_get_ex(array_obj, "mac_addr", &array_val)) {
@@ -439,18 +614,6 @@ static int discover_service(char *host, int port) {
 
                             json_object_put(array_obj);
                         }
-                    }
-
-                    if(json_object_object_get_ex(obj, "port", &val)) {
-                        strncpy(json_str, json_object_to_json_string(val), 50);
-
-                        new_entry->mcast_port = atoi(json_str);
-                    }
-
-                    if(json_object_object_get_ex(obj, "tlsPort", &val)) {
-                        strncpy(json_str, json_object_to_json_string(val), 50);
-
-                        new_entry->tls_port = atoi(json_str);
                     }
 
                     driveList->entries[driveList->used] = new_entry;

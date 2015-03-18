@@ -164,7 +164,7 @@ static int getDriveState(char *host, int port) {
         sessionConfig.clusterVersion = 0; // TODO: How do we determine clusterversion?
         sessionConfig.identity       = 1;
         sessionConfig.useSsl         = true;
-        sessionConfig.port           = (sessionConfig.useSsl == true) ? 8443 : port;
+        sessionConfig.port           = (sessionConfig.useSsl) ? 8443 : port;
         sessionConfig.timeoutSeconds = 1;
         sessionConfig.hmacKey        = ByteArray_CreateWithCString(HmacKeyString);
 

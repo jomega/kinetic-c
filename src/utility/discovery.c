@@ -160,10 +160,11 @@ static int getDriveState(char *host, int port) {
 
         strncpy(sessionConfig.host, host, HOST_NAME_MAX);
 
-        sessionConfig.port           = port;
+
         sessionConfig.clusterVersion = 0; // TODO: How do we determine clusterversion?
         sessionConfig.identity       = 1;
-        sessionConfig.useSsl         = false;
+        sessionConfig.useSsl         = true;
+        sessionConfig.port           = (sessionConfig.useSsl == true) ? 8443 : port;
         sessionConfig.timeoutSeconds = 1;
         sessionConfig.hmacKey        = ByteArray_CreateWithCString(HmacKeyString);
 
@@ -179,6 +180,7 @@ static int getDriveState(char *host, int port) {
                 KineticStatus termi_status = KineticClient_GetTerminationStatus(session);
 
                 if(termi_status == KINETIC_STATUS_DEVICE_LOCKED) {
+                    printf("Got KINETIC_STATUS_DEVICE_LOCKED\n");
                     retval = DRIVE_STATE_LOCKED;
                 } else if(termi_status == KINETIC_STATUS_INVALID_REQUEST) {
                     // 3.0.0 drives report INVALID_REQUEST instead of DEVICE_LOCKED

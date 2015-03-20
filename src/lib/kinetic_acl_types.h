@@ -23,7 +23,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include "kinetic_proto.h"
+#include "kinetic.pb-c.h"
 
 typedef enum {
     HMAC_UNKNOWN = 0,
@@ -40,7 +40,7 @@ struct hmac_key {
 struct ACL {
     size_t ACL_ceil;
     size_t ACL_count;
-    KineticProto_Command_Security_ACL **ACLs;
+    Com__Seagate__Kinetic__Proto__Command__Security__ACL **ACLs;
 };
 
 #define ACL_MAX_PERMISSIONS 8

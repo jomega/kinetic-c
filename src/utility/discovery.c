@@ -408,7 +408,7 @@ static int discover_service(char *host, int port) {
         // usage();
     }
 
-    char buf[1024];
+    char buf[1500];
     struct sockaddr_storage client_addr;
     socklen_t addr_len = sizeof(client_addr);
 
